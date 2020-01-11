@@ -8,6 +8,7 @@ from ..network.nodes import SRM0Nodes
 from ..network.topology import (
     AbstractConnection,
     Connection,
+    DynamicConnection,
     Conv2dConnection,
     LocalConnection,
 )
@@ -160,7 +161,7 @@ class PostPre(LearningRule):
             self.source.traces and self.target.traces
         ), "Both pre- and post-synaptic nodes must record spike traces."
 
-        if isinstance(connection, (Connection, LocalConnection)):
+        if isinstance(connection, (Connection, DynamicConnection, LocalConnection)):
             self.update = self._connection_update
         elif isinstance(connection, Conv2dConnection):
             self.update = self._conv2d_connection_update
@@ -279,7 +280,7 @@ class WeightDependentPostPre(LearningRule):
         self.wmin = connection.wmin
         self.wmax = connection.wmax
 
-        if isinstance(connection, (Connection, LocalConnection)):
+        if isinstance(connection, (Connection, DynamicConnection,LocalConnection)):
             self.update = self._connection_update
         elif isinstance(connection, Conv2dConnection):
             self.update = self._conv2d_connection_update

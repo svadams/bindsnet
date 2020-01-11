@@ -101,9 +101,10 @@ class AbstractConnection(ABC, Module):
         if learning:
             self.update_rule.update(**kwargs)
 
-        mask = kwargs.get("mask", None)
-        if mask is not None:
-            self.w.masked_fill_(mask, 0)
+        # Implementing this in DynamicConnection
+        #mask = kwargs.get("mask", None)
+        #if mask is not None:
+        #    self.w.masked_fill_(mask, 0)
 
     @abstractmethod
     def reset_state_variables(self) -> None:
@@ -153,6 +154,7 @@ class Connection(AbstractConnection):
         super().__init__(source, target, nu, reduction, weight_decay, **kwargs)
 
         w = kwargs.get("w", None)
+
         if w is None:
             if self.wmin == -np.inf or self.wmax == np.inf:
                 w = torch.clamp(torch.rand(source.n, target.n), self.wmin, self.wmax)
@@ -164,6 +166,7 @@ class Connection(AbstractConnection):
 
         self.w = Parameter(w, requires_grad=False)
         self.b = Parameter(kwargs.get("b", torch.zeros(target.n)), requires_grad=False)
+
 
     def compute(self, s: torch.Tensor) -> torch.Tensor:
         # language=rst
@@ -182,6 +185,7 @@ class Connection(AbstractConnection):
         # language=rst
         """
         Compute connection's update rule.
+        This is for functional plasticity
         """
         super().update(**kwargs)
 
@@ -202,6 +206,168 @@ class Connection(AbstractConnection):
         Contains resetting logic for the connection.
         """
         super().reset_state_variables()
+
+class DynamicConnection(AbstractConnection):
+    # language=rst
+    """
+    Specifies synapses between one or two populations of neurons.
+    The weight matrix is allowed to rewire dynamically
+    """
+
+    def __init__(
+        self,
+        source: Nodes,
+        target: Nodes,
+        nu: Optional[Union[float, Sequence[float]]] = None,
+        reduction: Optional[callable] = None,
+        weight_decay: float = 0.0,
+        **kwargs
+    ) -> None:
+        # language=rst
+        """
+        Instantiates a :code:`DynamicConnection` object.
+
+        :param source: A layer of nodes from which the connection originates.
+        :param target: A layer of nodes to which the connection connects.
+        :param nu: Learning rate for both pre- and post-synaptic events.
+        :param reduction: Method for reducing parameter updates along the minibatch
+            dimension.
+        :param weight_decay: Constant multiple to decay weights by on each iteration.
+
+        Keyword arguments:
+
+        :param LearningRule update_rule: Modifies connection parameters according to
+            some rule.
+        :param torch.Tensor w: Strengths of synapses.
+        :param torch.Tensor b: Target population bias.
+        :param float wmin: Minimum allowed value on the connection weights.
+        :param float wmax: Maximum allowed value on the connection weights.
+        :param float norm: Total weight per target neuron normalization constant.
+        :param prune_thresh: Weight threshold for pruning
+        :param prune_prob: Probability for pruning
+        """
+        super().__init__(source, target, nu, reduction, weight_decay, **kwargs)
+
+        w = kwargs.get("w", None)
+        prune_thresh = kwargs.get("prune_thresh", 0.0)
+        prune_prob = kwargs.get("prune_prob", 0.0)
+        create_prob = kwargs.get("create_prob", 0.0)
+
+        if w is None:
+            if self.wmin == -np.inf or self.wmax == np.inf:
+                w = torch.clamp(torch.rand(source.n, target.n), self.wmin, self.wmax)
+            else:
+                w = self.wmin + torch.rand(source.n, target.n) * (self.wmax - self.wmin)
+        else:
+            if self.wmin != -np.inf or self.wmax != np.inf:
+                w = torch.clamp(w, self.wmin, self.wmax)
+
+        self.w = Parameter(w, requires_grad=False)
+        self.b = Parameter(kwargs.get("b", torch.zeros(target.n)), requires_grad=False)
+        self.prune_thresh = prune_thresh
+        self.prune_prob = prune_prob
+        self.create_prob = create_prob
+
+    def compute(self, s: torch.Tensor) -> torch.Tensor:
+        # language=rst
+        """
+        Compute pre-activations given spikes using connection weights.
+
+        :param s: Incoming spikes.
+        :return: Incoming spikes multiplied by synaptic weights (with or without
+                 decaying spike activation).
+        """
+        # Compute multiplication of spike activations by weights and add bias.
+        post = s.float().view(s.size(0), -1) @ self.w + self.b
+        return post.view(s.size(0), *self.target.shape)
+
+    def update(self, **kwargs) -> None:
+        # language=rst
+        """
+        Compute connection's update rule.
+        This is for functional and structural plasticity
+        It implements a form of pruning by forcing matrix entries
+        to zero according to a threshold
+        """
+
+        # call regular functional plasticity rule
+        super().update(**kwargs)
+
+        # Connection pruning mechanisms
+
+        if self.prune_thresh > 0.0:
+
+           print("Threshold pruning")
+
+           # Threshold pruning
+
+           # set all values less than the threshold to zero
+
+           self.w.data[(self.w.data > 0.0) & (self.w.data < self.prune_thresh)] = 0.0
+
+           # We have to handle negative weights as well
+
+           self.w.data[(self.w.data < 0.0) & (self.w.data > -(self.prune_thresh))] = 0.0
+
+        if self.prune_prob > 0.0:
+
+           print("Probabalistic pruning")
+
+           # Probabalistic pruning
+
+           # Create a probability mask
+
+           mask = torch.rand(self.w.data.shape)
+           print("probs", mask)
+           mask[mask < self.prune_prob] = 0.0
+           mask[mask >= self.prune_prob] = 1.0
+
+           print("mask", mask)
+           print("wt", self.w.data)
+
+           #print(mask.data,(mask==1.0).sum().data)
+
+           self.w.data = mask * self.w.data
+
+        # Synaptogenesis mechanisms
+
+        if self.create_prob > 0.0:
+
+           print("Probabalistic synaptogenesis")
+
+           # Create a probability mask
+
+           create_mask = torch.rand(self.w.data.shape)
+           print("probs", create_mask)
+         
+           create_mask[create_mask < self.create_prob] = 0.0
+           create_mask[create_mask >= self.create_prob] = 1.0
+
+           print("mask",create_mask)
+           print("wt",self.w.data)
+
+           self.w.data[(create_mask == 0.0) & (self.w.data == 0.0)] = np.random.uniform(self.wmin, self.wmax)
+
+        print("Dynamic Weights", self.w.data)
+
+    def normalize(self) -> None:
+        # language=rst
+        """
+        Normalize weights so each target neuron has sum of connection weights equal to
+        ``self.norm``.
+        """
+        if self.norm is not None:
+            w_abs_sum = self.w.abs().sum(0).unsqueeze(0)
+            w_abs_sum[w_abs_sum == 0] = 1.0
+            self.w *= self.norm / w_abs_sum
+
+    def reset_state_variables(self) -> None:
+        # language=rst
+        """
+        Contains resetting logic for the connection.
+        """
+        super().reset_state_variables()
+
 
 
 class Conv2dConnection(AbstractConnection):
