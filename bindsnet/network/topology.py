@@ -245,6 +245,8 @@ class DynamicConnection(AbstractConnection):
         :param float norm: Total weight per target neuron normalization constant.
         :param prune_thresh: Weight threshold for pruning
         :param prune_prob: Probability for pruning
+        :param create_prob: Probability for probabalistic synaptogenesis
+        :param create: Enable activity dependent synaptogenesis
         """
         super().__init__(source, target, nu, reduction, weight_decay, **kwargs)
 
@@ -252,6 +254,7 @@ class DynamicConnection(AbstractConnection):
         prune_thresh = kwargs.get("prune_thresh", 0.0)
         prune_prob = kwargs.get("prune_prob", 0.0)
         create_prob = kwargs.get("create_prob", 0.0)
+        create = kwargs.get("create", False)
 
         if w is None:
             if self.wmin == -np.inf or self.wmax == np.inf:
@@ -267,6 +270,7 @@ class DynamicConnection(AbstractConnection):
         self.prune_thresh = prune_thresh
         self.prune_prob = prune_prob
         self.create_prob = create_prob
+        self.create = create
 
     def compute(self, s: torch.Tensor) -> torch.Tensor:
         # language=rst
@@ -297,7 +301,7 @@ class DynamicConnection(AbstractConnection):
 
         if self.prune_thresh > 0.0:
 
-           print("Threshold pruning")
+           #print("Threshold pruning")
 
            # Threshold pruning
 
@@ -311,19 +315,19 @@ class DynamicConnection(AbstractConnection):
 
         if self.prune_prob > 0.0:
 
-           print("Probabalistic pruning")
+           #print("Probabalistic pruning")
 
            # Probabalistic pruning
 
            # Create a probability mask
 
            mask = torch.rand(self.w.data.shape)
-           print("probs", mask)
+           #print("probs", mask)
            mask[mask < self.prune_prob] = 0.0
            mask[mask >= self.prune_prob] = 1.0
 
-           print("mask", mask)
-           print("wt", self.w.data)
+           #print("mask", mask)
+           #print("wt", self.w.data)
 
            #print(mask.data,(mask==1.0).sum().data)
 
@@ -333,22 +337,49 @@ class DynamicConnection(AbstractConnection):
 
         if self.create_prob > 0.0:
 
-           print("Probabalistic synaptogenesis")
+           #print("Probabalistic synaptogenesis")
 
            # Create a probability mask
 
            create_mask = torch.rand(self.w.data.shape)
-           print("probs", create_mask)
+           #print("probs", create_mask)
          
            create_mask[create_mask < self.create_prob] = 0.0
            create_mask[create_mask >= self.create_prob] = 1.0
 
-           print("mask",create_mask)
-           print("wt",self.w.data)
+           #print("mask",create_mask)
+           #print("wt",self.w.data)
 
            self.w.data[(create_mask == 0.0) & (self.w.data == 0.0)] = np.random.uniform(self.wmin, self.wmax)
 
-        print("Dynamic Weights", self.w.data)
+        if self.create:
+
+           print("Activity dependent synaptogenesis")
+
+           # get the source and target activity traces
+
+           batch_size = self.source.batch_size
+
+           source_x = self.source.x.view(batch_size, -1).unsqueeze(2)
+           target_x = self.target.x.view(batch_size, -1).unsqueeze(1)
+
+           source_mask = torch.BoolTensor(source_x.data.shape)
+           target_mask = torch.BoolTensor(target_x.data.shape)
+
+           
+
+           source_mask[(source_x.data > 0.50)] = True
+           target_mask[(target_x.data > 0.50)] = True
+
+
+           masked_weights = self.w.data[source_mask[0,0,:],target_mask[0,0,:]]
+
+           print("source x", source_x)
+           print("source x", source_mask[0,0,:])
+           print("target x", target_x)
+           print("target x", target_mask[0,0,:])
+           print("Dynamic Weights", self.w.data)
+           print("Dynamic Weights", masked_weights)
 
     def normalize(self) -> None:
         # language=rst

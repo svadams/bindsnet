@@ -425,3 +425,24 @@ class Network(torch.nn.Module):
         """
         self.learning = mode
         return super().train(mode)
+
+    def summary(self):
+        # language=rst
+        """
+        Prints a simple summary of the network
+        """
+        print("Model summary")
+        print("=============\n")
+        print("Layers")
+        print("------")
+        print(self.layers)
+        print("\n")
+        print("Connections")
+        print("-----------")
+        print(self.connections)
+        print("\n")
+        print("Monitors")
+        print("--------")
+        print(self.monitors)
+        print("\n")
+
