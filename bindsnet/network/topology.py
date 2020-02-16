@@ -363,23 +363,38 @@ class DynamicConnection(AbstractConnection):
            source_x = self.source.x.view(batch_size, -1).unsqueeze(2)
            target_x = self.target.x.view(batch_size, -1).unsqueeze(1)
 
-           source_mask = torch.BoolTensor(source_x.data.shape)
-           target_mask = torch.BoolTensor(target_x.data.shape)
+           #source_mask = torch.BoolTensor(source_x.data.shape)
+           #target_mask = torch.BoolTensor(target_x.data.shape) 
+           source_mask = torch.zeros_like(source_x)
+           source_mask = source_mask.type(torch.BoolTensor)
+           target_mask = torch.zeros_like(target_x)
+           target_mask = target_mask.type(torch.BoolTensor)
 
-           
-
+           # Create masks where the source and target traces are > 0.5
            source_mask[(source_x.data > 0.50)] = True
            target_mask[(target_x.data > 0.50)] = True
 
 
-           masked_weights = self.w.data[source_mask[0,0,:],target_mask[0,0,:]]
+           # Create a mask of random weight values between min and max
+           # zero all values where the weight matrix is not zero
+           weight_mask = torch.FloatTensor(self.w.data.shape[0], self.w.data.shape[1]).uniform_(self.wmin, self.wmax)
+           weight_mask[(self.w.data != 0.0)] = 0.0
+
 
            print("source x", source_x)
-           print("source x", source_mask[0,0,:])
+           print("source x mask", source_mask[0,0,:])
            print("target x", target_x)
-           print("target x", target_mask[0,0,:])
-           print("Dynamic Weights", self.w.data)
-           print("Dynamic Weights", masked_weights)
+           print("target x mask", target_mask[0,0,:])
+           print("Weight mask", weight_mask)
+           print("Dynamic Weights before", self.w.data)
+
+           # Add the weight mask to the weights, only where the source and target
+           # traces values are above threshold - should have the effect of setting
+           # weight sonly where they were previously zero 
+           self.w.data[source_mask[0,0,:],target_mask[0,0,:]] =  self.w.data[source_mask[0,0,:],target_mask[0,0,:]] + weight_mask[source_mask[0,0,:],target_mask[0,0,:]]
+
+           print("Dynamic Weights after", self.w.data)
+
 
     def normalize(self) -> None:
         # language=rst
