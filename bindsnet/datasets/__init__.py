@@ -1,5 +1,6 @@
 from .torchvision_wrapper import create_torchvision_dataset_wrapper
 from .spoken_mnist import SpokenMNIST
+from .split_mnist import SplitMNIST
 from .davis import Davis
 from .alov300 import ALOV300
 

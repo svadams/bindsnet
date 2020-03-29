@@ -109,6 +109,7 @@ def all_activity(
     """
     n_samples = spikes.size(0)
 
+
     # Sum over time dimension (spike ordering doesn't matter).
     spikes = spikes.sum(1)
 
@@ -123,7 +124,7 @@ def all_activity(
 
             # Compute layer-wise firing rate for this label.
             rates[:, i] = torch.sum(spikes[:, indices], 1) / n_assigns
-
+           
     # Predictions are arg-max of layer-wise firing rates.
     return torch.sort(rates, dim=1, descending=True)[1][:, 0]
 
