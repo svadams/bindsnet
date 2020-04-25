@@ -297,6 +297,8 @@ class DynamicConnection(AbstractConnection):
         # call regular functional plasticity rule
         super().update(**kwargs)
 
+        #print("Dynamic Weights before structural plasticity", self.w.data)
+
         # Connection pruning mechanisms
 
         if self.prune_thresh > 0.0:
@@ -363,37 +365,45 @@ class DynamicConnection(AbstractConnection):
            source_x = self.source.x.view(batch_size, -1).unsqueeze(2)
            target_x = self.target.x.view(batch_size, -1).unsqueeze(1)
 
-           #source_mask = torch.BoolTensor(source_x.data.shape)
-           #target_mask = torch.BoolTensor(target_x.data.shape) 
+           # Create masks where the source and target traces are > 0.5
+           # i.e. the neurons that have been recently 'active'
+
            source_mask = torch.zeros_like(source_x)
            source_mask = source_mask.type(torch.BoolTensor)
            target_mask = torch.zeros_like(target_x)
            target_mask = target_mask.type(torch.BoolTensor)
 
-           # Create masks where the source and target traces are > 0.5
            source_mask[(source_x.data > 0.50)] = True
            target_mask[(target_x.data > 0.50)] = True
 
-
-           # Create a mask of random weight values between min and max
-           # zero all values where the weight matrix is not zero
-           weight_mask = torch.FloatTensor(self.w.data.shape[0], self.w.data.shape[1]).uniform_(self.wmin, self.wmax)
-           weight_mask[(self.w.data != 0.0)] = 0.0
-
-
            print("source x", source_x)
-           print("source x mask", source_mask[0,0,:])
+           print("source x mask", source_mask[0,0,:],  torch.max(source_mask[0,0,:]))
            print("target x", target_x)
-           print("target x mask", target_mask[0,0,:])
-           print("Weight mask", weight_mask)
-           print("Dynamic Weights before", self.w.data)
+           print("target x mask", target_mask[0,0,:],  torch.max(target_mask[0,0,:]))
 
-           # Add the weight mask to the weights, only where the source and target
-           # traces values are above threshold - should have the effect of setting
-           # weight sonly where they were previously zero 
-           self.w.data[source_mask[0,0,:],target_mask[0,0,:]] =  self.w.data[source_mask[0,0,:],target_mask[0,0,:]] + weight_mask[source_mask[0,0,:],target_mask[0,0,:]]
+           # Need to check if the source and target mask tensors actually have any True entries
+           # otherwise not worth proceeding!
 
-           print("Dynamic Weights after", self.w.data)
+           print("Dynamic Weights before structural plasticity", self.w.data)
+
+           if (torch.max(source_mask[0,0,:]) == True) and (torch.max(target_mask[0,0,:]) == True):
+
+               # Create a mask of random weight values between min and max
+               # zero all values where the weight matrix is not zero
+               weight_mask = torch.FloatTensor(self.w.data.shape[0], self.w.data.shape[1]).uniform_(self.wmin, self.wmax)
+               weight_mask[(self.w.data != 0.0)] = 0.0
+
+               #print("Weight mask", weight_mask)
+
+               # Add the weight mask to the weights, only where the source and target
+               # traces values are above threshold - should have the effect of setting
+               # weights only where they were previously zero 
+
+               self.w.data[source_mask[0,0,:],target_mask[0,0,:]] =  self.w.data[source_mask[0,0,:],target_mask[0,0,:]] + weight_mask[source_mask[0,0,:],target_mask[0,0,:]]
+           else:
+               print("Nothing to update")
+
+           print("Dynamic Weights after structural plasticity", self.w.data)
 
 
     def normalize(self) -> None:
