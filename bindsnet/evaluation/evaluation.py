@@ -55,7 +55,11 @@ def assign_labels(
     proportions[proportions != proportions] = 0  # Set NaNs to 0
 
     # Neuron assignments are the labels they fire most for.
-    assignments = torch.max(proportions, 1)[1] + n_labels
+    assignments_raw = torch.max(proportions, 1)[1]
+
+    # Map assignments to the correct labels
+
+    assignments = torch.IntTensor(list(map(lambda x : int(label_ids[x]), assignments_raw)))
 
     return assignments, proportions, rates
 
@@ -127,7 +131,12 @@ def all_activity(
             rates[:, i] = torch.sum(spikes[:, indices], 1) / n_assigns
            
     # Predictions are arg-max of layer-wise firing rates.
-    predictions = torch.sort(rates, dim=1, descending=True)[1][:, 0] + n_labels
+    predictions_raw = torch.sort(rates, dim=1, descending=True)[1][:, 0]
+
+    # Map assignments to the correct labels
+
+    predictions = torch.IntTensor(list(map(lambda x : int(labels[x]), predictions_raw)))
+
     return predictions
 
 
@@ -173,7 +182,11 @@ def proportion_weighting(
             )
 
     # Predictions are arg-max of layer-wise firing rates.
-    predictions = torch.sort(rates, dim=1, descending=True)[1][:, 0] + n_labels
+    predictions_raw = torch.sort(rates, dim=1, descending=True)[1][:, 0]
+
+    # Map assignments to the correct labels
+
+    predictions = torch.IntTensor(list(map(lambda x : int(labels[x]), predictions_raw)))
 
     return predictions
 
