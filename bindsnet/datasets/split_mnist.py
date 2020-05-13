@@ -35,7 +35,7 @@ class SplitMNIST(torch.utils.data.Dataset):
         :param shuffle: Whether to randomly permute order of dataset.
         :param train: Load training split if true else load test split
         :param num_samples: Number of samples to pass to the batch
-        :param selection: Which half of digits to select; 1 for 0-4; 2 for 5-9
+        :param selection: Which half of digits to select; 1 for 0-4; 2 for 5-9; 3 for 0-9
         """
         super().__init__()
 
@@ -99,9 +99,14 @@ class SplitMNIST(torch.utils.data.Dataset):
         if self.selection == 1:
             images = np.load(self.path + "/train/digits_0_4_images.npy")
             labels = np.load(self.path + "/train/digits_0_4_labels.npy")
-        else:
+
+        if self.selection == 2:
             images = np.load(self.path + "/train/digits_5_9_images.npy")
             labels = np.load(self.path + "/train/digits_5_9_labels.npy")
+
+        if self.selection == 3:
+            images = np.load(self.path + "/train/digits_0_9_images.npy")
+            labels = np.load(self.path + "/train/digits_0_9_labels.npy")
 
 
         if self.shuffle:
@@ -122,9 +127,14 @@ class SplitMNIST(torch.utils.data.Dataset):
         if self.selection == 1:
             images = np.load(self.path + "/test/digits_0_4_images.npy")
             labels = np.load(self.path + "/test/digits_0_4_labels.npy")
-        else:
+
+        if self.selection == 2:
             images = np.load(self.path + "/test/digits_5_9_images.npy")
             labels = np.load(self.path + "/test/digits_5_9_labels.npy")
+
+        if self.selection == 3:
+            images = np.load(self.path + "/test/digits_0_9_images.npy")
+            labels = np.load(self.path + "/test/digits_0_9_labels.npy")
 
 
         if self.shuffle:

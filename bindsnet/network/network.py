@@ -400,6 +400,16 @@ class Network(torch.nn.Module):
         for c in self.connections:
             self.connections[c].normalize()
 
+    def run_sp(self) -> None:
+        # language=rst
+        """
+        Run structural plasticity
+        """
+
+        for c in self.connections:
+            self.connections[c].sp()
+        
+
     def reset_state_variables(self) -> None:
         # language=rst
         """

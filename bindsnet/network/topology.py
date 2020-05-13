@@ -107,6 +107,14 @@ class AbstractConnection(ABC, Module):
         #    self.w.masked_fill_(mask, 0)
 
     @abstractmethod
+    def sp(self) -> None:
+        # language=rst
+        """
+        Runs structural plasticity
+        """
+        pass
+
+    @abstractmethod
     def reset_state_variables(self) -> None:
         # language=rst
         """
@@ -188,6 +196,13 @@ class Connection(AbstractConnection):
         This is for functional plasticity
         """
         super().update(**kwargs)
+
+    def sp(self) -> None:
+        # language=rst
+        """
+        Runs structural plasticity
+        """
+        super().sp()
 
     def normalize(self) -> None:
         # language=rst
@@ -297,7 +312,86 @@ class DynamicConnection(AbstractConnection):
         # call regular functional plasticity rule
         super().update(**kwargs)
 
+    def sp(self) -> None:
+        # language=rst
+        """
+        Runs structural plasticity
+        """
+
         #print("Dynamic Weights before structural plasticity", self.w.data)
+
+        # Synaptogenesis mechanisms
+
+        if self.create_prob > 0.0:
+
+           #print("Probabalistic synaptogenesis")
+
+           # Create a probability mask
+
+           create_mask = torch.rand(self.w.data.shape)
+           #print("probs", create_mask)
+         
+           create_mask[create_mask < self.create_prob] = 0.0
+           create_mask[create_mask >= self.create_prob] = 1.0
+
+           #print("mask",create_mask)
+           #print("wt",self.w.data)
+           #print((create_mask==0.0).sum().data)
+           #print(self.w.data[(create_mask == 0.0) & (self.w.data == 0.0)].data.shape)
+
+           self.w.data[(create_mask == 0.0) & (self.w.data == 0.0)] = 0.3 * (np.random.uniform(self.wmin, self.wmax))
+
+        if self.create:
+
+           #print("Activity dependent synaptogenesis")
+
+           # get the source and target activity traces
+
+           batch_size = self.source.batch_size
+
+           source_x = self.source.x.view(batch_size, -1).unsqueeze(2)
+           target_x = self.target.x.view(batch_size, -1).unsqueeze(1)
+
+           # Create masks where the source and target traces are > 0.5
+           # i.e. the neurons that have been recently 'active'
+
+           source_mask = torch.zeros_like(source_x)
+           source_mask = source_mask.type(torch.BoolTensor)
+           target_mask = torch.zeros_like(target_x)
+           target_mask = target_mask.type(torch.BoolTensor)
+
+           source_mask[(source_x.data > 0.50)] = True
+           target_mask[(target_x.data > 0.50)] = True
+
+           #print("source x", source_x)
+           #print("source x mask", source_mask[0,0,:],  torch.max(source_mask[0,0,:]))
+           #print("target x", target_x)
+           #print("target x mask", target_mask[0,0,:],  torch.max(target_mask[0,0,:]))
+
+           # Need to check if the source and target mask tensors actually have any True entries
+           # otherwise not worth proceeding!
+
+           #print("Dynamic Weights before structural plasticity", self.w.data)
+
+           if (torch.max(source_mask[0,0,:]) == True) and (torch.max(target_mask[0,0,:]) == True):
+
+               # Create a mask of random weight values between min and max
+               # zero all values where the weight matrix is not zero
+               weight_mask = torch.FloatTensor(self.w.data.shape[0], self.w.data.shape[1]).uniform_(self.wmin, self.wmax)
+               weight_mask[(self.w.data != 0.0)] = 0.0
+
+               #print("Weight mask", weight_mask)
+
+               # Add the weight mask to the weights, only where the source and target
+               # traces values are above threshold - should have the effect of setting
+               # weights only where they were previously zero 
+
+               self.w.data[source_mask[0,0,:],target_mask[0,0,:]] =  self.w.data[source_mask[0,0,:],target_mask[0,0,:]] + weight_mask[source_mask[0,0,:],target_mask[0,0,:]]
+           else:
+               pass
+               #print("Nothing to update")
+
+           #print("Dynamic Weights after structural plasticity", self.w.data)
 
         # Connection pruning mechanisms
 
@@ -331,80 +425,9 @@ class DynamicConnection(AbstractConnection):
            #print("mask", mask)
            #print("wt", self.w.data)
 
-           #print(mask.data,(mask==1.0).sum().data)
+           #print((mask==0.0).sum().data)
 
            self.w.data = mask * self.w.data
-
-        # Synaptogenesis mechanisms
-
-        if self.create_prob > 0.0:
-
-           #print("Probabalistic synaptogenesis")
-
-           # Create a probability mask
-
-           create_mask = torch.rand(self.w.data.shape)
-           #print("probs", create_mask)
-         
-           create_mask[create_mask < self.create_prob] = 0.0
-           create_mask[create_mask >= self.create_prob] = 1.0
-
-           #print("mask",create_mask)
-           #print("wt",self.w.data)
-
-           self.w.data[(create_mask == 0.0) & (self.w.data == 0.0)] = np.random.uniform(self.wmin, self.wmax)
-
-        if self.create:
-
-           print("Activity dependent synaptogenesis")
-
-           # get the source and target activity traces
-
-           batch_size = self.source.batch_size
-
-           source_x = self.source.x.view(batch_size, -1).unsqueeze(2)
-           target_x = self.target.x.view(batch_size, -1).unsqueeze(1)
-
-           # Create masks where the source and target traces are > 0.5
-           # i.e. the neurons that have been recently 'active'
-
-           source_mask = torch.zeros_like(source_x)
-           source_mask = source_mask.type(torch.BoolTensor)
-           target_mask = torch.zeros_like(target_x)
-           target_mask = target_mask.type(torch.BoolTensor)
-
-           source_mask[(source_x.data > 0.50)] = True
-           target_mask[(target_x.data > 0.50)] = True
-
-           print("source x", source_x)
-           print("source x mask", source_mask[0,0,:],  torch.max(source_mask[0,0,:]))
-           print("target x", target_x)
-           print("target x mask", target_mask[0,0,:],  torch.max(target_mask[0,0,:]))
-
-           # Need to check if the source and target mask tensors actually have any True entries
-           # otherwise not worth proceeding!
-
-           print("Dynamic Weights before structural plasticity", self.w.data)
-
-           if (torch.max(source_mask[0,0,:]) == True) and (torch.max(target_mask[0,0,:]) == True):
-
-               # Create a mask of random weight values between min and max
-               # zero all values where the weight matrix is not zero
-               weight_mask = torch.FloatTensor(self.w.data.shape[0], self.w.data.shape[1]).uniform_(self.wmin, self.wmax)
-               weight_mask[(self.w.data != 0.0)] = 0.0
-
-               #print("Weight mask", weight_mask)
-
-               # Add the weight mask to the weights, only where the source and target
-               # traces values are above threshold - should have the effect of setting
-               # weights only where they were previously zero 
-
-               self.w.data[source_mask[0,0,:],target_mask[0,0,:]] =  self.w.data[source_mask[0,0,:],target_mask[0,0,:]] + weight_mask[source_mask[0,0,:],target_mask[0,0,:]]
-           else:
-               print("Nothing to update")
-
-           print("Dynamic Weights after structural plasticity", self.w.data)
-
 
     def normalize(self) -> None:
         # language=rst
@@ -555,6 +578,13 @@ class Conv2dConnection(AbstractConnection):
         """
         super().update(**kwargs)
 
+    def sp(self) -> None:
+        # language=rst
+        """
+        Runs structural plasticity
+        """
+        super().sp()
+
     def normalize(self) -> None:
         # language=rst
         """
@@ -649,6 +679,13 @@ class MaxPool2dConnection(AbstractConnection):
         Compute connection's update rule.
         """
         super().update(**kwargs)
+
+    def sp(self) -> None:
+        # language=rst
+        """
+        Runs structural plasticity
+        """
+        super().sp()
 
     def normalize(self) -> None:
         # language=rst
@@ -826,6 +863,13 @@ class LocalConnection(AbstractConnection):
 
         super().update(**kwargs)
 
+    def sp(self) -> None:
+        # language=rst
+        """
+        Runs structural plasticity
+        """
+        super().sp()
+
     def normalize(self) -> None:
         # language=rst
         """
@@ -906,6 +950,13 @@ class MeanFieldConnection(AbstractConnection):
         Compute connection's update rule.
         """
         super().update(**kwargs)
+
+    def sp(self) -> None:
+        # language=rst
+        """
+        Runs structural plasticity
+        """
+        super().sp()
 
     def normalize(self) -> None:
         # language=rst
@@ -1013,6 +1064,13 @@ class SparseConnection(AbstractConnection):
         Compute connection's update rule.
         """
         pass
+
+    def sp(self) -> None:
+        # language=rst
+        """
+        Runs structural plasticity
+        """
+        super().sp()
 
     def normalize(self) -> None:
         # language=rst
