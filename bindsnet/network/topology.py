@@ -106,13 +106,6 @@ class AbstractConnection(ABC, Module):
         #if mask is not None:
         #    self.w.masked_fill_(mask, 0)
 
-    @abstractmethod
-    def sp(self) -> None:
-        # language=rst
-        """
-        Runs structural plasticity
-        """
-        pass
 
     @abstractmethod
     def reset_state_variables(self) -> None:
@@ -196,13 +189,6 @@ class Connection(AbstractConnection):
         This is for functional plasticity
         """
         super().update(**kwargs)
-
-    def sp(self) -> None:
-        # language=rst
-        """
-        Runs structural plasticity
-        """
-        super().sp()
 
     def normalize(self) -> None:
         # language=rst
@@ -312,11 +298,14 @@ class DynamicConnection(AbstractConnection):
         # call regular functional plasticity rule
         super().update(**kwargs)
 
-    def sp(self) -> None:
+    def sp(self) -> Tuple:
         # language=rst
         """
         Runs structural plasticity
         """
+
+        total_conns_created = 0
+        total_conns_pruned = 0
 
         #print("Dynamic Weights before structural plasticity", self.w.data)
 
@@ -341,6 +330,8 @@ class DynamicConnection(AbstractConnection):
 
            self.w.data[(create_mask == 0.0) & (self.w.data == 0.0)] = 0.3 * (np.random.uniform(self.wmin, self.wmax))
 
+           total_conns_created += (create_mask==0.0).sum().data
+
         if self.create:
 
            #print("Activity dependent synaptogenesis")
@@ -360,33 +351,55 @@ class DynamicConnection(AbstractConnection):
            target_mask = torch.zeros_like(target_x)
            target_mask = target_mask.type(torch.BoolTensor)
 
+           #print("src activity max", torch.max(source_x))
+           #print("target activity max", torch.max(target_x))
+           #print("zero weights", (self.w == 0.0).sum().data)
+
            source_mask[(source_x.data > 0.50)] = True
            target_mask[(target_x.data > 0.50)] = True
 
            #print("source x", source_x)
-           #print("source x mask", source_mask[0,0,:],  torch.max(source_mask[0,0,:]))
+           #print("source x mask", source_mask,  torch.max(source_mask))
            #print("target x", target_x)
-           #print("target x mask", target_mask[0,0,:],  torch.max(target_mask[0,0,:]))
+           #print("target x mask", target_mask,  torch.max(target_mask))
 
            # Need to check if the source and target mask tensors actually have any True entries
            # otherwise not worth proceeding!
 
            #print("Dynamic Weights before structural plasticity", self.w.data)
 
-           if (torch.max(source_mask[0,0,:]) == True) and (torch.max(target_mask[0,0,:]) == True):
+           if (torch.max(source_mask) == True) and (torch.max(target_mask) == True):
+
+           #if (torch.max(source_mask[0,0,:]) == True) and (torch.max(target_mask[0,0,:]) == True):
 
                # Create a mask of random weight values between min and max
                # zero all values where the weight matrix is not zero
-               weight_mask = torch.FloatTensor(self.w.data.shape[0], self.w.data.shape[1]).uniform_(self.wmin, self.wmax)
+               weight_mask = torch.FloatTensor(self.w.data.shape[0], self.w.data.shape[1]).uniform_(self.wmin, self.wmax) * 0.3
+               #print(weight_mask)
                weight_mask[(self.w.data != 0.0)] = 0.0
 
-               #print("Weight mask", weight_mask)
+               # Here we 'not' the source and target masks so we can easily
+               # use them to set the weight matrix to zero where activity is not > 0.5  
+               source_mask = torch.logical_not(source_mask)
+               target_mask = torch.logical_not(target_mask)
 
-               # Add the weight mask to the weights, only where the source and target
-               # traces values are above threshold - should have the effect of setting
-               # weights only where they were previously zero 
+               weight_mask[source_mask[0,:,0],:] = 0.0
+               weight_mask[:,target_mask[0,0,:]] = 0.0
+               #print(weight_mask)
 
-               self.w.data[source_mask[0,0,:],target_mask[0,0,:]] =  self.w.data[source_mask[0,0,:],target_mask[0,0,:]] + weight_mask[source_mask[0,0,:],target_mask[0,0,:]]
+               #print("Weights to create", (weight_mask!=0.0).sum().data)
+
+
+               # Now simply add the weight mask to the weights.
+               # This should have the effect of setting 'new' weights
+               # only where the source and target traces values are above 
+               # threshold and where the weights were previously zero 
+
+               self.w.data += weight_mask
+
+               total_conns_created += (weight_mask!=0.0).sum().data
+
+               #self.w.data[source_mask[0,:,0],target_mask[0,0,:]] =  self.w.data[source_mask[0,:,0],target_mask[0,0,:]] + weight_mask[source_mask[0,:,0],target_mask[0,0,:]]
            else:
                pass
                #print("Nothing to update")
@@ -399,15 +412,25 @@ class DynamicConnection(AbstractConnection):
 
            #print("Threshold pruning")
 
+
            # Threshold pruning
 
            # set all values less than the threshold to zero
-
-           self.w.data[(self.w.data > 0.0) & (self.w.data < self.prune_thresh)] = 0.0
-
            # We have to handle negative weights as well
 
+           # Create a mask so we can calculate the number
+           # of connections that will be pruned
+           prune_mask = torch.ones(self.w.data.shape)
+
+           prune_mask[(self.w.data > 0.0) & (self.w.data < self.prune_thresh)] = 0.0
+           prune_mask[(self.w.data < 0.0) & (self.w.data > -(self.prune_thresh))] = 0.0
+
+
+           # Prune the actual connections
+           self.w.data[(self.w.data > 0.0) & (self.w.data < self.prune_thresh)] = 0.0
            self.w.data[(self.w.data < 0.0) & (self.w.data > -(self.prune_thresh))] = 0.0
+
+           total_conns_pruned += (prune_mask==0.0).sum().data
 
         if self.prune_prob > 0.0:
 
@@ -417,17 +440,21 @@ class DynamicConnection(AbstractConnection):
 
            # Create a probability mask
 
-           mask = torch.rand(self.w.data.shape)
-           #print("probs", mask)
-           mask[mask < self.prune_prob] = 0.0
-           mask[mask >= self.prune_prob] = 1.0
+           prune_mask = torch.rand(self.w.data.shape)
+           #print("probs", prune_mask)
+           prune_mask[prune_mask < self.prune_prob] = 0.0
+           prune_mask[prune_mask >= self.prune_prob] = 1.0
 
-           #print("mask", mask)
+           #print("prune_mask", prune_mask)
            #print("wt", self.w.data)
 
-           #print((mask==0.0).sum().data)
+           #print((prune_mask==0.0).sum().data)
 
-           self.w.data = mask * self.w.data
+           self.w.data = prune_mask * self.w.data
+
+           total_conns_pruned += (prune_mask==0.0).sum().data
+
+        return (total_conns_created, total_conns_pruned)
 
     def normalize(self) -> None:
         # language=rst

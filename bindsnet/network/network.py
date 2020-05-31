@@ -1,11 +1,11 @@
 import tempfile
-from typing import Dict, Optional, Type, Iterable
+from typing import Dict, Optional, Type, Iterable, Tuple
 
 import torch
 
 from .monitors import AbstractMonitor
 from .nodes import Nodes
-from .topology import AbstractConnection
+from .topology import AbstractConnection, DynamicConnection
 from ..learning.reward import AbstractReward
 
 
@@ -108,6 +108,9 @@ class Network(torch.nn.Module):
         self.monitors = {}
 
         self.train(learning)
+
+        self.conns_pruned = 0
+        self.conns_created = 0
 
         if reward_fn is not None:
             self.reward_fn = reward_fn()
@@ -400,14 +403,19 @@ class Network(torch.nn.Module):
         for c in self.connections:
             self.connections[c].normalize()
 
-    def run_sp(self) -> None:
+    def run_sp(self) -> Tuple :
         # language=rst
         """
         Run structural plasticity
         """
 
         for c in self.connections:
-            self.connections[c].sp()
+            if (isinstance(self.connections[c], DynamicConnection)):
+                (created, pruned) = self.connections[c].sp()
+                self.conns_created += created
+                self.conns_pruned += pruned
+
+        return (self.conns_created, self.conns_pruned)
         
 
     def reset_state_variables(self) -> None:
