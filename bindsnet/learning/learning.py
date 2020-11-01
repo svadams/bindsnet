@@ -161,7 +161,7 @@ class PostPre(LearningRule):
             self.source.traces and self.target.traces
         ), "Both pre- and post-synaptic nodes must record spike traces."
 
-        if isinstance(connection, (Connection, DynamicConnection, LocalConnection)):
+        if isinstance(connection, (Connection, LocalConnection)):
             self.update = self._connection_update
         elif isinstance(connection, Conv2dConnection):
             self.update = self._conv2d_connection_update
@@ -186,12 +186,12 @@ class PostPre(LearningRule):
         # Pre-synaptic update.
         if self.nu[0]:
             update = self.reduction(torch.bmm(source_s, target_x), dim=0)
-            self.connection.w[self.connection.w != 0.0] -= self.nu[0] * update[self.connection.w != 0.0]
+            self.connection.w -= self.nu[0] * update
 
         # Post-synaptic update.
         if self.nu[1]:
             update = self.reduction(torch.bmm(source_x, target_s), dim=0)
-            self.connection.w[self.connection.w != 0.0] += self.nu[1] * update[self.connection.w != 0.0]
+            self.connection.w += self.nu[1] * update
 
         super().update()
 
@@ -235,6 +235,81 @@ class PostPre(LearningRule):
             self.connection.w += self.nu[1] * post.view(self.connection.w.size())
 
         super().update()
+
+class PostPreSP(LearningRule):
+    # language=rst
+    """
+    Simple STDP rule involving both pre- and post-synaptic spiking activity. By default,
+    pre-synaptic update is negative and the post-synaptic update is positive.
+
+    This PostPre rule only applies updates when the synaptic weight is not exactly 0.0.
+    This is deemed a pruned connection and can only be reactivated by activity-dependent
+    synaptic plasticity
+    """
+
+    def __init__(
+        self,
+        connection: AbstractConnection,
+        nu: Optional[Union[float, Sequence[float]]] = None,
+        reduction: Optional[callable] = None,
+        weight_decay: float = 0.0,
+        **kwargs
+    ) -> None:
+        # language=rst
+        """
+        Constructor for ``PostPre`` learning rule.
+
+        :param connection: An ``AbstractConnection`` object whose weights the
+            ``PostPre`` learning rule will modify.
+        :param nu: Single or pair of learning rates for pre- and post-synaptic events.
+        :param reduction: Method for reducing parameter updates along the batch
+            dimension.
+        :param weight_decay: Constant multiple to decay weights by on each iteration.
+        """
+        super().__init__(
+            connection=connection,
+            nu=nu,
+            reduction=reduction,
+            weight_decay=weight_decay,
+            **kwargs
+        )
+
+        assert (
+            self.source.traces and self.target.traces
+        ), "Both pre- and post-synaptic nodes must record spike traces."
+
+        if isinstance(connection, (DynamicConnection)):
+            self.update = self._connection_update
+        else:
+            raise NotImplementedError(
+                "This learning rule is not supported for this Connection type."
+            )
+
+    def _connection_update(self, **kwargs) -> None:
+        # language=rst
+        """
+        Post-pre learning rule for ``Connection`` subclass of ``AbstractConnection``
+        class.
+        """
+        batch_size = self.source.batch_size
+
+        source_s = self.source.s.view(batch_size, -1).unsqueeze(2).float()
+        source_x = self.source.x.view(batch_size, -1).unsqueeze(2)
+        target_s = self.target.s.view(batch_size, -1).unsqueeze(1).float()
+        target_x = self.target.x.view(batch_size, -1).unsqueeze(1)
+
+        # Pre-synaptic update.
+        if self.nu[0]:
+            update = self.reduction(torch.bmm(source_s, target_x), dim=0)
+            self.connection.w[self.connection.w != 0.0] -= self.nu[0] * update[self.connection.w != 0.0]
+
+        # Post-synaptic update.
+        if self.nu[1]:
+            update = self.reduction(torch.bmm(source_x, target_s), dim=0)
+            self.connection.w[self.connection.w != 0.0] += self.nu[1] * update[self.connection.w != 0.0]
+
+        super().update()
+
 
 
 class WeightDependentPostPre(LearningRule):
@@ -380,108 +455,7 @@ class WeightDependentPostPre(LearningRule):
 
         super().update()
 
-class WeightDependentPostPreVR(LearningRule):
-    # language=rst
-    """
-    STDP rule involving both pre- and post-synaptic spiking activity. The post-synaptic
-    update is positive and the pre- synaptic update is negative, and both are dependent
-    on the magnitude of the synaptic weights.
-    
-    This version of weight dependent STDP follows the method of van Rossum et al. (2000):
-    'Stable hebbian learning from spike timing-dependent plasticity', Journal of Neuroscience,
-    Vol (20), pp 8812-8821.
 
-    Here potentiation (post-synaptic update) is additive and depression (pre-synaptic update)
-    is multipicative. The main benefit is that it encourages a unimodal weight distribution.
-
-    Here, the weight update is only applied to connections that are not exactly 0.0 which
-    means it is suitable for use with Structural Plasticity
-
-
-    """
-
-    def __init__(
-        self,
-        connection: AbstractConnection,
-        nu: Optional[Union[float, Sequence[float]]] = None,
-        reduction: Optional[callable] = None,
-        weight_decay: float = 0.0,
-        **kwargs
-    ) -> None:
-        # language=rst
-        """
-        Constructor for ``WeightDependentPostPreVR`` learning rule.
-
-        :param connection: An ``AbstractConnection`` object whose weights the
-            ``WeightDependentPostPreVR`` learning rule will modify.
-        :param nu: Single or pair of learning rates for pre- and post-synaptic events.
-        :param reduction: Method for reducing parameter updates along the batch
-            dimension.
-        :param weight_decay: Constant multiple to decay weights by on each iteration.
-        """
-        super().__init__(
-            connection=connection,
-            nu=nu,
-            reduction=reduction,
-            weight_decay=weight_decay,
-            **kwargs
-        )
-
-        assert self.source.traces, "Pre-synaptic nodes must record spike traces."
-        assert (
-            connection.wmax != np.inf
-        ), "Connection must define finite wmax."
-
-        self.wmax = connection.wmax
-
-        if isinstance(connection, (DynamicConnection)):
-            self.update = self._connection_update
-        else:
-            raise NotImplementedError(
-                "This learning rule is not supported for this Connection type."
-            )
-
-    def _connection_update(self, **kwargs) -> None:
-        # language=rst
-        """
-        Post-pre learning rule for ``DynamicConnection`` subclass of ``AbstractConnection``
-        class.
-        """
-        batch_size = self.source.batch_size
-
-        source_s = self.source.s.view(batch_size, -1).unsqueeze(2).float()
-        source_x = self.source.x.view(batch_size, -1).unsqueeze(2)
-        target_s = self.target.s.view(batch_size, -1).unsqueeze(1).float()
-        target_x = self.target.x.view(batch_size, -1).unsqueeze(1)
-
-        #ltd_update = 0
-        #ltp_update = 0
-        stdp_delta = 0
-
-        # Pre-synaptic update (depression)
-        if self.nu[0]:
-            outer_product = self.reduction(torch.bmm(source_s, target_x), dim=0)
-            stdp_delta -= self.nu[0] * outer_product
-
-
-        # Post-synaptic update. (potentiation)
-        if self.nu[1]:
-            outer_product = self.reduction(torch.bmm(source_x, target_s), dim=0)
-            stdp_delta += self.nu[1] * outer_product
-
-
-        ltp_update = stdp_delta[self.connection.w != 0.0] * (self.wmax - self.connection.w[self.connection.w != 0.0])
-        ltd_update = stdp_delta[self.connection.w != 0.0]
-
-
-        print('LTP', ltp_update)
-        print('LTD', ltd_update)
-        print('STDP delta', stdp_delta)
-
-        self.connection.w[self.connection.w != 0.0] += ltp_update
-        self.connection.w[self.connection.w != 0.0] *= ltd_update
-
-        #super().update()
 
 class Hebbian(LearningRule):
     # language=rst

@@ -7,7 +7,7 @@ from torch.nn.modules.utils import _pair
 import torch.nn as nn
 from torchvision import models
 
-from ..learning import PostPre, WeightDependentPostPre
+from ..learning import PostPre, PostPreSP, WeightDependentPostPre
 from ..network import Network
 from ..network.nodes import Input, LIFNodes, DiehlAndCookNodes, AdaptiveLIFNodes
 from ..network.topology import Connection, DynamicConnection, LocalConnection
@@ -300,7 +300,7 @@ class DiehlAndCook2015sp(Network):
             source=input_layer,
             target=exc_layer,
             w=w,
-            update_rule=PostPre,
+            update_rule=PostPreSP,
             nu=nu,
             reduction=reduction,
             wmin=wmin,
